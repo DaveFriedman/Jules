@@ -1,20 +1,29 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+import yfinance as yf
 
-def simulate_stock_prices(S0=150, mu=0.2, sigma=0.4, days=60):
-    np.random.seed(42) # For reproducibility
-    dt = 1/252
-    prices = [S0]
-    for _ in range(1, days):
-        # Geometric Brownian Motion
-        drift = (mu - 0.5 * sigma**2) * dt
-        shock = sigma * np.sqrt(dt) * np.random.normal()
-        price = prices[-1] * np.exp(drift + shock)
-        prices.append(price)
+def fetch_real_stock_prices(ticker="GOOGL", period="1y"):
+    """Fetches real historical stock prices using yfinance."""
+    print(f"Fetching {period} of data for {ticker}...")
+    stock_data = yf.download(ticker, period=period)
 
-    dates = [datetime.today() - timedelta(days=days - i) for i in range(days)]
-    df = pd.DataFrame({'Date': dates, 'Price': prices})
+    # Reset index so 'Date' becomes a column and extract just the Date and Close price
+    df = stock_data.reset_index()
+
+    # yfinance output might have multi-level columns if multiple tickers are passed,
+    # or just simple columns for one ticker. Let's handle standard single ticker format.
+    # Usually it's Date, Open, High, Low, Close, Adj Close, Volume
+    # We will just use 'Close'
+    if isinstance(df.columns, pd.MultiIndex):
+        # Flatten multi-index if necessary (happens in newer yfinance versions sometimes)
+        df.columns = [col[0] if col[1] == '' else col[0] for col in df.columns]
+
+    # We only need Date and Close. Ensure they exist.
+    if 'Date' in df.columns and 'Close' in df.columns:
+        df = df[['Date', 'Close']].rename(columns={'Close': 'Price'})
+    else:
+        raise ValueError("Could not find 'Date' and 'Close' columns in yfinance data.")
+
     return df
 
 def apply_moving_averages(df):
@@ -43,16 +52,26 @@ def trading_algorithm(df):
         action = "Hold"
         price = row['Price']
 
+        # Ensure price is a scalar float just in case
+        if isinstance(price, pd.Series):
+             price = price.iloc[0]
+        price = float(price)
+
         # We can only trade if we have 30MA
         if not pd.isna(row['30MA']):
-            if row['Position'] == 1.0 and cash >= price:
+            # Ensure row['Position'] is scalar
+            pos = row['Position']
+            if isinstance(pos, pd.Series):
+                pos = pos.iloc[0]
+
+            if pos == 1.0 and cash >= price:
                 # Buy
                 shares_to_buy = int(cash // price)
                 if shares_to_buy > 0:
                     cash -= shares_to_buy * price
                     shares += shares_to_buy
                     action = f"BUY {shares_to_buy}"
-            elif row['Position'] == -1.0 and shares > 0:
+            elif pos == -1.0 and shares > 0:
                 # Sell
                 cash += shares * price
                 action = f"SELL {shares}"
@@ -61,21 +80,29 @@ def trading_algorithm(df):
         total_val = cash + shares * price
 
         # Formatting for ledger
-        price_str = f"{row['Price']:.2f}"
-        ma7_str = f"{row['7MA']:.2f}" if not pd.isna(row['7MA']) else "N/A"
-        ma30_str = f"{row['30MA']:.2f}" if not pd.isna(row['30MA']) else "N/A"
+        price_str = f"{price:.2f}"
+
+        ma7 = row['7MA']
+        if isinstance(ma7, pd.Series): ma7 = ma7.iloc[0]
+        ma7_str = f"{float(ma7):.2f}" if not pd.isna(ma7) else "N/A"
+
+        ma30 = row['30MA']
+        if isinstance(ma30, pd.Series): ma30 = ma30.iloc[0]
+        ma30_str = f"{float(ma30):.2f}" if not pd.isna(ma30) else "N/A"
+
         date_str = row['Date'].strftime('%Y-%m-%d')
 
         print(f"{date_str:<12} | {price_str:<8} | {ma7_str:<8} | {ma30_str:<8} | {action:<15} | {cash:<10.2f} | {shares:<6} | {total_val:.2f}")
 
-    final_value = cash + shares * df.iloc[-1]['Price']
+    final_price = float(df.iloc[-1]['Price'])
+    final_value = cash + shares * final_price
     return initial_value, final_value, cash, shares
 
 def main():
-    df = simulate_stock_prices(S0=150, days=60)
+    df = fetch_real_stock_prices(ticker="GOOGL", period="1y")
     df = apply_moving_averages(df)
 
-    print("Simulated 60 days of GOOGL prices and Golden Cross trading algorithm")
+    print("Fetched 1 year of GOOGL prices and running Golden Cross trading algorithm")
     print("=" * 95)
     init_val, final_val, cash, shares = trading_algorithm(df)
 
