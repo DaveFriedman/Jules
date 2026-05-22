@@ -2,10 +2,13 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-def fetch_real_stock_prices(ticker="GOOGL", period="1y"):
+def fetch_real_stock_prices(ticker="GOOGL", start="2026-04-01", end="2026-05-22"):
     """Fetches real historical stock prices using yfinance."""
-    print(f"Fetching {period} of data for {ticker}...")
-    stock_data = yf.download(ticker, period=period)
+    print(f"Fetching data for {ticker} from {start} to {end}...")
+    stock_data = yf.download(ticker, start=start, end=end)
+
+    if stock_data.empty:
+        return pd.DataFrame()
 
     # Reset index so 'Date' becomes a column and extract just the Date and Close price
     df = stock_data.reset_index()
@@ -27,6 +30,8 @@ def fetch_real_stock_prices(ticker="GOOGL", period="1y"):
     return df
 
 def apply_moving_averages(df):
+    if df.empty:
+        return df
     df['7MA'] = df['Price'].rolling(window=7).mean()
     df['30MA'] = df['Price'].rolling(window=30).mean()
     return df
@@ -36,12 +41,19 @@ def trading_algorithm(df):
     shares = 0
     initial_value = cash
 
+    if df.empty:
+        print("No data available to run the trading algorithm.")
+        return initial_value, initial_value, cash, shares
+
     print(f"{'Date':<12} | {'Price':<8} | {'7MA':<8} | {'30MA':<8} | {'Action':<15} | {'Cash':<10} | {'Shares':<6} | {'Total Value'}")
     print("-" * 95)
 
     df['Signal'] = 0.0
-    # Signal is 1 if 7MA > 30MA, else 0
-    df.loc[30:, 'Signal'] = np.where(df['7MA'][30:] > df['30MA'][30:], 1.0, 0.0)
+
+    # Need at least 30 periods for moving average
+    if len(df) > 30:
+        # Signal is 1 if 7MA > 30MA, else 0
+        df.loc[30:, 'Signal'] = np.where(df['7MA'][30:] > df['30MA'][30:], 1.0, 0.0)
 
     # Position: shift signal by 1 to represent executing at the next open?
     # Let's just execute at the close of the day we get the signal.
@@ -99,10 +111,10 @@ def trading_algorithm(df):
     return initial_value, final_value, cash, shares
 
 def main():
-    df = fetch_real_stock_prices(ticker="GOOGL", period="1y")
+    df = fetch_real_stock_prices(ticker="GOOGL", start="2026-04-01", end="2026-05-22")
     df = apply_moving_averages(df)
 
-    print("Fetched 1 year of GOOGL prices and running Golden Cross trading algorithm")
+    print("Fetched GOOGL prices from 2026-04-01 to 2026-05-21 and running Golden Cross trading algorithm")
     print("=" * 95)
     init_val, final_val, cash, shares = trading_algorithm(df)
 
